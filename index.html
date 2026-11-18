@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>La leadership nei ruoli operativi</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icona-192.png">
+<link rel="apple-touch-icon" href="icona-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="La leadership nei ruoli operativi">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#3D5A85">
+<style>
+html,body{margin:0;height:100%;background:#1f2d42;color:#fff;font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;box-sizing:border-box;text-align:center}
+h1{font-size:1.6rem;margin:0;max-width:30ch}
+p{margin:0;opacity:.85;max-width:44ch;line-height:1.45}
+form{display:flex;flex-direction:column;gap:12px;width:min(360px,100%)}
+input{font-size:1.1rem;padding:14px;border-radius:10px;border:0}
+button{font-size:1.1rem;padding:14px;border-radius:10px;border:0;background:#fff;color:#1f2d42;font-weight:600}
+.barra{width:min(360px,100%);height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}
+.barra>div{height:100%;width:0;background:#fff;transition:width .3s}
+.nascosto{display:none}
+.errore{color:#ffb4b4}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="titolo">La leadership nei ruoli operativi</h1>
+  <p id="stato">Avvio in corso...</p>
+  <form id="form" class="nascosto" autocomplete="off">
+    <input id="pw" type="password" placeholder="Password del corso" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button type="submit">Installa il corso</button>
+  </form>
+  <div id="barra" class="barra nascosto"><div></div></div>
+  <button id="apri" class="nascosto">Apri il corso</button>
+</main>
+<script>
+(function(){
+var $=function(id){return document.getElementById(id);};
+function stato(t,err){$('stato').textContent=t;$('stato').className=err?'errore':'';}
+function db(){return new Promise(function(ok,ko){var r=indexedDB.open('corso-tablet',1);r.onupgradeneeded=function(){r.result.createObjectStore('k');};r.onsuccess=function(){ok(r.result);};r.onerror=function(){ko(r.error);};});}
+function idb(op,k,v){return db().then(function(d){return new Promise(function(ok,ko){var tx=d.transaction('k',op==='get'?'readonly':'readwrite');var s=tx.objectStore('k');var r=op==='get'?s.get(k):op==='del'?s.clear():s.put(v,k);r.onsuccess=function(){ok(r.result);};r.onerror=function(){ko(r.error);};});});}
+function b64(s){var b=atob(s),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}
+var CFG,REG;
+function prova(chiave){return fetch('c/'+CFG.mappa).catch(function(){throw new Error('rete');}).then(function(r){if(!r.ok)throw new Error('rete');return r.arrayBuffer();}).then(function(buf){var u=new Uint8Array(buf);return crypto.subtle.decrypt({name:'AES-GCM',iv:u.slice(0,12)},chiave,u.slice(12));});}
+function sw(){return REG.active||REG.waiting||REG.installing;}
+function apri(){location.replace('app/index.html');}
+function scarica(poi){
+  $('barra').classList.remove('nascosto');stato('Scarico il corso sul tablet... 0%');
+  navigator.serviceWorker.onmessage=function(e){var d=e.data||{};
+    if(d.tipo==='progresso'){var p=Math.round(100*d.fatti/d.totale);$('barra').firstChild.style.width=p+'%';stato('Scarico il corso sul tablet... '+p+'%');}
+    if(d.tipo==='pronto'){$('barra').firstChild.style.width='100%';stato('Corso installato. Da ora si apre direttamente da questa icona.');$('apri').classList.remove('nascosto');}
+    if(d.tipo==='errore'){stato('Corso pronto, ma non e\' stato possibile salvarlo tutto sul tablet: servira\' il Wi-Fi. ('+d.msg+')',true);$('apri').classList.remove('nascosto');}
+  };
+  sw().postMessage({tipo:'scarica'});
+}
+$('apri').onclick=apri;
+$('form').onsubmit=function(e){e.preventDefault();var pw=$('pw').value;if(!pw)return;
+  stato('Verifico la password...');
+  crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']).then(function(base){
+    return crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(CFG.salt),iterations:CFG.iterazioni,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+  }).then(function(k){return prova(k).then(function(){return idb('put',CFG.salt,k);});}).then(function(){
+    $('form').classList.add('nascosto');$('pw').value='';sw().postMessage({tipo:'chiave'});scarica();
+  }).catch(function(err){stato(err&&err.message==='rete'?'Serve la connessione per l\'installazione.':'Password non corretta.',true);});
+};
+if(!('serviceWorker' in navigator)||!window.crypto||!crypto.subtle){stato('Questo browser non supporta il corso. Usa Safari su iPad o Chrome su Android.',true);return;}
+var esci=/[?&]esci\b/.test(location.search), erroreRete=/[?&]errore=rete\b/.test(location.search);
+fetch('config.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){CFG=c;
+  return navigator.serviceWorker.register('sw.js');}).then(function(){return navigator.serviceWorker.ready;}).then(function(reg){REG=reg;
+  if(esci){return idb('del').then(function(){return caches.keys();}).then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).then(function(){REG.active.postMessage({tipo:'chiave'});stato('Il corso e\' stato rimosso da questo dispositivo.');});}
+  return idb('get',CFG.salt).then(function(k){
+    if(!k){stato('Per installare il corso su questo tablet inserisci la password.');$('form').classList.remove('nascosto');$('pw').focus();return;}
+    if(erroreRete){stato('Il corso non e\' ancora salvato del tutto su questo tablet: collega il Wi-Fi e tocca Apri il corso.',true);$('apri').classList.remove('nascosto');REG.active.postMessage({tipo:'scarica'});return;}
+    stato('Apro il corso...');
+    return prova(k).then(function(){REG.active.postMessage({tipo:'scarica'});apri();},function(err){
+      if(err&&err.message==='rete'){apri();return;}
+      return idb('del').then(function(){stato('La password del corso e\' cambiata: inseriscila di nuovo.');$('form').classList.remove('nascosto');});
+    });
+  });
+}).catch(function(e){stato('Impossibile avviare il corso: '+(e&&e.message||e),true);});
+})();
+</script>
+</body>
+</html>
